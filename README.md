@@ -125,11 +125,33 @@ Token cost on the hot path: **zero**. All scoring is out-of-band.
 
 ---
 
+## What you get — morning Slack briefing
+
+Run `agent-dashcam daily` (or cron it) and this lands in your DM:
+
+<p align="center">
+  <img src="./docs/images/slack-daily-briefing.png" alt="Agent Dashcam daily Slack briefing" width="520" />
+</p>
+
+Weighted average with trend arrow, 10-axis bar chart, action items ranked by impact, and combo-pattern detection — all in one glance. No dashboards to open, no graphs to squint at.
+
+---
+
 ## Install
+
+### Option A — Ask your agent to do it
+
+Paste this into Claude Code / Codex CLI / Gemini CLI and it will install Agent Dashcam for you:
+
+> Install Agent Dashcam from `https://github.com/sanghun0724/agent-dashcam` into `~/.claude/agent-dashcam/` (clone or symlink), copy `config.example.json` to `config.json`, run `python3 scripts/install_hooks.py` to wire the hooks, then verify with `python3 -m unittest discover -s fixtures` and report the test count. Use the `AGENT_DASHCAM_ROOT` env var if I already have a different install path.
+
+Your agent will handle the clone, symlink, hook wiring, and verification — and tell you if anything failed.
+
+### Option B — Manual install
 
 ```bash
 # 1. Clone this repo somewhere
-git clone https://github.com/sabnhun0724/agent-dashcam.git
+git clone https://github.com/sanghun0724/agent-dashcam.git
 cd agent-dashcam
 
 # 2. Symlink or copy into ~/.claude/agent-dashcam/

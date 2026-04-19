@@ -124,11 +124,33 @@ Hot path 토큰 비용: **0**. 모든 채점은 out-of-band.
 
 ---
 
+## 결과물 — 아침 Slack 브리핑
+
+`agent-dashcam daily` 를 실행 (또는 cron 으로 걸어두면) 이렇게 DM 으로 도착합니다:
+
+<p align="center">
+  <img src="./docs/images/slack-daily-briefing.png" alt="Agent Dashcam 일일 Slack 브리핑" width="520" />
+</p>
+
+가중 평균 + 추세 화살표, 10축 바 차트, 임팩트 순 액션 아이템, 콤보 패턴 감지 — 한 눈에 끝. 대시보드 열고 그래프 들여다볼 필요 없이 슬랙 타임라인에서 바로 판단 가능.
+
+---
+
 ## 설치
+
+### 옵션 A — 자기 에이전트한테 시키기
+
+이 프롬프트를 Claude Code / Codex CLI / Gemini CLI 에 붙여넣으면 자동 설치됩니다:
+
+> `https://github.com/sanghun0724/agent-dashcam` 에서 Agent Dashcam 을 `~/.claude/agent-dashcam/` 에 설치해줘 (clone 또는 symlink). `config.example.json` 을 `config.json` 으로 복사하고, `python3 scripts/install_hooks.py` 로 훅 연결한 뒤, `python3 -m unittest discover -s fixtures` 로 검증해서 테스트 개수 알려줘. 내가 이미 다른 경로에 설치되어 있으면 `AGENT_DASHCAM_ROOT` 환경변수 써줘.
+
+에이전트가 clone, symlink, 훅 연결, 검증까지 알아서 처리하고 실패 시 보고해줍니다.
+
+### 옵션 B — 수동 설치
 
 ```bash
 # 1. 레포 클론
-git clone https://github.com/sabnhun0724/agent-dashcam.git
+git clone https://github.com/sanghun0724/agent-dashcam.git
 cd agent-dashcam
 
 # 2. ~/.claude/agent-dashcam/ 으로 심볼릭 링크 또는 복사
