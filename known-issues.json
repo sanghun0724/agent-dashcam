@@ -1,0 +1,109 @@
+[
+  {
+    "id": "KI-001",
+    "title": "SessionStart hook stdout contaminates conversation when non-JSON",
+    "status": "active",
+    "created": "2026-04-18",
+    "verified_in_version": null,
+    "last_checked_version": "2.1.114",
+    "tags": [
+      "hook",
+      "sessionstart",
+      "stdout-leak"
+    ],
+    "github_issue": null,
+    "release_keyword": null,
+    "workaround_file": null,
+    "notes": "SessionStart hook\uc774 plain text\ub97c stdout\uc5d0 \ucd9c\ub825\ud558\uba74 \ucee8\ud14d\uc2a4\ud2b8\uc5d0 \uc0bd\uc785\ub428. JSON {hookSpecificOutput} \ud3ec\ub9f7 \uac15\uc81c \ud544\uc694.",
+    "last_checked_at": "2026-04-19T05:26:41.868009Z"
+  },
+  {
+    "id": "KI-002",
+    "title": "PreToolUse hook exit non-zero blocks tool silently",
+    "status": "NEEDS_USER_CONFIRM",
+    "created": "2026-04-18",
+    "verified_in_version": "v2.1.110",
+    "last_checked_version": "2.1.114",
+    "tags": [
+      "hook",
+      "pretooluse",
+      "silent-block"
+    ],
+    "github_issue": null,
+    "release_keyword": "pretooluse",
+    "workaround_file": "~/.claude/hooks/pre-tool-use.mjs",
+    "notes": "PreToolUse exit(1) \uc2dc \uc0ac\uc6a9\uc790\uc5d0\uac8c \uc774\uc720 \ub178\ucd9c \uc5c6\uc774 \ud234\ucf5c\uc774 \ub9c9\ud798. \ud56d\uc0c1 exit(0) + decision:deny \uc0ac\uc6a9 \uad8c\uc7a5.",
+    "last_checked_at": "2026-04-19T05:26:41.868009Z"
+  },
+  {
+    "id": "KI-003",
+    "title": "Stop hook 30s timeout kills retention",
+    "status": "active",
+    "created": "2026-04-18",
+    "verified_in_version": null,
+    "last_checked_version": "2.1.114",
+    "tags": [
+      "hook",
+      "stop",
+      "timeout"
+    ],
+    "github_issue": null,
+    "release_keyword": "stop hook timeout",
+    "workaround_file": "~/.claude/agent-dashcam/hooks/session-stop.mjs",
+    "notes": "Stop hook\uc740 30\ucd08 \uc81c\ud55c. \ucc44\uc810(5s) + retention(3s) \ubd84\ud560 subprocess\ub85c \uc6b0\ud68c. \uc774 \uc774\uc288\uac00 \ud574\uacb0\ub418\uba74 single-process\ub85c \ub2e8\uc21c\ud654 \uac00\ub2a5.",
+    "last_checked_at": "2026-04-19T05:26:41.868009Z"
+  },
+  {
+    "id": "KI-004",
+    "title": "JSONL session log path changes with symlinked cwd",
+    "status": "active",
+    "created": "2026-04-18",
+    "verified_in_version": null,
+    "last_checked_version": "2.1.114",
+    "tags": [
+      "jsonl",
+      "cwd",
+      "symlink"
+    ],
+    "github_issue": null,
+    "release_keyword": null,
+    "workaround_file": "~/.claude/agent-dashcam/hooks/session-stop.mjs",
+    "notes": "cwd\uac00 symlink\uba74 projects/ \ud558\uc704 \ub514\ub809\ud1a0\ub9ac\uba85\uc774 realpath \uae30\uc900\uc73c\ub85c \uc0dd\uc131\ub428. resolveJsonlPath\uc5d0\uc11c primary \u2192 realpathSync fallback \u2192 glob 3\ub2e8 \ud544\uc694.",
+    "last_checked_at": "2026-04-19T05:26:41.868009Z"
+  },
+  {
+    "id": "KI-005",
+    "title": "settings.json symlink overwritten by CLI commands",
+    "status": "NEEDS_USER_CONFIRM",
+    "created": "2026-04-18",
+    "verified_in_version": "v2.1.111",
+    "last_checked_version": "2.1.114",
+    "tags": [
+      "settings",
+      "symlink"
+    ],
+    "github_issue": null,
+    "release_keyword": "settings.json",
+    "workaround_file": "~/.claude/agent-dashcam/scripts/install_hooks.py",
+    "notes": "\uc77c\ubd80 CLI\ub294 ~/.claude/settings.json \uc218\uc815 \uc2dc symlink\ub97c regular file\ub85c \ub36e\uc5b4\uc4f4\ub2e4. Path.resolve()\ub85c \uc2e4\uc81c \ud30c\uc77c\uc5d0 \uc9c1\uc811 \uc4f0\uba74 symlink \ubcf4\uc874.",
+    "last_checked_at": "2026-04-19T05:26:41.868009Z"
+  },
+  {
+    "id": "KI-006",
+    "title": "cache_read_input_tokens undercount on short turns",
+    "status": "active",
+    "created": "2026-04-18",
+    "verified_in_version": null,
+    "last_checked_version": "2.1.114",
+    "tags": [
+      "usage",
+      "cache",
+      "context-efficiency"
+    ],
+    "github_issue": null,
+    "release_keyword": "cache_read",
+    "workaround_file": null,
+    "notes": "\uccab \uba87 \ud134\uc740 cache_read=0\uc774\ub77c context_efficiency\uac00 \ub0ae\uac8c \ub098\uc634. Agent Dashcam score\uc5d0\uc11c\ub294 empty session=0.5 neutral\ub85c \ucc98\ub9ac.",
+    "last_checked_at": "2026-04-19T05:26:41.868009Z"
+  }
+]

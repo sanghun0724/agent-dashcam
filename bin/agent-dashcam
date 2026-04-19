@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""agent-dashcam CLI wrapper — score / envup / status subcommands."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+
+AGENT_DASHCAM_ROOT = Path(os.environ.get("AGENT_DASHCAM_ROOT") or (Path.home() / ".claude" / "agent-dashcam"))
+SCRIPTS = AGENT_DASHCAM_ROOT / "scripts"
+SCORES = AGENT_DASHCAM_ROOT / "scores"
+REPORTS = AGENT_DASHCAM_ROOT / "reports"
+
+
+def cmd_score(args: argparse.Namespace) -> int:
+    if not args.input:
+        print("usage: agent-dashcam score --input <JSONL> [--provider {auto,claude,codex,gemini}]", file=sys.stderr)
+        return 2
+    script = SCRIPTS / "agent_dashcam_score.py"
+    cli = [sys.executable, str(script), "--input", args.input, "--save"]
+    if args.provider:
+        cli += ["--provider", args.provider]
+    return subprocess.call(cli)
+
+
+def cmd_envup(args: argparse.Namespace) -> int:
+    script = SCRIPTS / "envup.py"
+    cli = [sys.executable, str(script)]
+    if args.offline:
+        cli.append("--offline")
+    if args.dry_run:
+        cli.append("--dry-run")
+    return subprocess.call(cli)
+
+
+def cmd_daily(args: argparse.Namespace) -> int:
+    script = SCRIPTS / "daily_report.py"
+    cli = [sys.executable, str(script)]
+    if args.window:
+        cli += ["--window", str(args.window)]
+    if args.dry_run:
+        cli.append("--dry-run")
+    if args.print_payload:
+        cli.append("--print-payload")
+    if args.stdout_md:
+        cli.append("--stdout-md")
+    if args.channel:
+        cli += ["--channel", args.channel]
+    return subprocess.call(cli)
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    script = SCRIPTS / "export_prometheus.py"
+    cli = [sys.executable, str(script)]
+    if args.output:
+        cli += ["--output", args.output]
+    if args.window:
+        cli += ["--window", str(args.window)]
+    if args.stdout:
+        cli.append("--stdout")
+    return subprocess.call(cli)
+
+
+def cmd_calibrate(args: argparse.Namespace) -> int:
+    script = SCRIPTS / "retention.py"
+    cli = [sys.executable, str(script), "--calibrate-only"]
+    if args.dry_run:
+        cli.append("--dry-run")
+    return subprocess.call(cli)
+
+
+def cmd_status(_args: argparse.Namespace) -> int:
+    print("=== Agent Dashcam status ===")
+
+    if SCORES.exists():
+        files = sorted(SCORES.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        print(f"\nrecent scores ({len(files)} total):")
+        for p in files[:5]:
+            try:
+                d = json.loads(p.read_text())
+                wa = d.get("weighted_avg", "?")
+                sid = (d.get("meta", {}) or {}).get("sessionId", "?")
+                print(f"  - {p.name[:60]}… avg={wa} sid={sid[:8]}")
+            except Exception as e:
+                print(f"  - {p.name} (parse error: {e})")
+    else:
+        print("  (no scores directory)")
+
+    if REPORTS.exists():
+        reports = sorted(REPORTS.glob("envup-*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+        print(f"\nrecent envup reports ({len(reports)} total):")
+        for p in reports[:3]:
+            ts = datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            lines = p.read_text().splitlines()
+            summary_line = next((ln for ln in lines if ln.startswith("- total issues:")), "(no summary)")
+            print(f"  - {p.name} [{ts}] {summary_line.strip('- ')}")
+    else:
+        print("  (no reports directory)")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="agent-dashcam", description="Agent Dashcam CLI")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("score", help="JSONL 세션 채점")
+    s.add_argument("--input", "-i")
+    s.add_argument(
+        "--provider",
+        choices=("auto", "claude", "codex", "gemini"),
+        default="auto",
+        help="세션 로그 출처 (default: auto)",
+    )
+    s.set_defaults(func=cmd_score)
+
+    e = sub.add_parser("envup", help="외부 변화 감지")
+    e.add_argument("--offline", action="store_true")
+    e.add_argument("--dry-run", action="store_true")
+    e.set_defaults(func=cmd_envup)
+
+    st = sub.add_parser("status", help="최근 점수표 + envup 요약")
+    st.set_defaults(func=cmd_status)
+
+    d = sub.add_parser("daily", help="일일 리포트 + Slack payload 생성 (v3)")
+    d.add_argument("--window", type=int, default=None, help="최근 N 세션 (default 7)")
+    d.add_argument("--dry-run", action="store_true")
+    d.add_argument("--print-payload", action="store_true", help="Slack blocks JSON만 stdout")
+    d.add_argument("--stdout-md", action="store_true", help="Markdown만 stdout")
+    d.add_argument("--channel", default=None, help="Slack channel override")
+    d.set_defaults(func=cmd_daily)
+
+    ex = sub.add_parser("export", help="Prometheus textfile 포맷 export (v3)")
+    ex.add_argument("--output", default=None, help="출력 경로 (default /tmp/agent-dashcam.prom)")
+    ex.add_argument("--window", type=int, default=None, help="최근 N 세션")
+    ex.add_argument("--stdout", action="store_true")
+    ex.set_defaults(func=cmd_export)
+
+    cal = sub.add_parser("calibrate", help="임계값 동적 캘리브레이션 (v3)")
+    cal.add_argument("--dry-run", action="store_true")
+    cal.set_defaults(func=cmd_calibrate)
+
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,43 @@
+# --- User-private runtime data (never commit) ---
+scores/
+reports/
+logs/
+monthly/
+
+# --- Ralph / planning session artifacts ---
+prd.json
+progress.txt
+.omc/
+
+# --- The active config is user-specific; ship the template only ---
+config.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
