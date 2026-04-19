@@ -566,6 +566,7 @@ def score_jsonl(path: Path, config: dict, provider: str | None = None) -> dict:
         "weighted_avg": round(weighted_avg, 4),
         "meta": {
             "sessionId": session_id,
+            "provider": session_data.get("provider"),
             "project_dir": project_dir,
             "jsonl_lines": session_data["jsonl_lines"],
             "jsonl_bytes": session_data["jsonl_bytes"],

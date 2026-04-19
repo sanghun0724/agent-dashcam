@@ -159,7 +159,44 @@ def trend_arrow(slope: float) -> str:
     return "→"
 
 
-def render_markdown(date: str, scores: list[dict], stats: dict, window: int) -> str:
+def render_worst_sessions_md(worst: list[dict]) -> list[str]:
+    """Render the 'sessions that need a look' section in markdown. Returns
+    list of lines; caller appends + joins. Empty list when nothing to show."""
+    if not worst:
+        return []
+    lines = ["", "## Sessions that need a look"]
+    for s in worst:
+        meta = s.get("meta") or {}
+        sid = meta["sessionId"]
+        provider = meta.get("provider")
+        wa = s.get("weighted_avg")
+        low = _lowest_axis_for_score(s) or "?"
+        lines.append(
+            f"- weighted_avg=`{wa}` · lowest=`{low}` · `{sid}`"
+        )
+        lines.append(f"  - resume: `{_resume_command(provider, sid)}`")
+    return lines
+
+
+def render_worst_sessions_block(worst: list[dict]) -> dict | None:
+    """Render the Slack mrkdwn block for worst sessions; None when empty."""
+    if not worst:
+        return None
+    lines = [":warning: *Sessions that need a look*"]
+    for s in worst:
+        meta = s.get("meta") or {}
+        sid = meta["sessionId"]
+        provider = meta.get("provider")
+        wa = s.get("weighted_avg")
+        low = _lowest_axis_for_score(s) or "?"
+        lines.append(
+            f"• weighted_avg=`{wa}` · lowest=`{low}` · `{sid}`"
+        )
+        lines.append(f"   → resume: `{_resume_command(provider, sid)}`")
+    return {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}}
+
+
+def render_markdown(date: str, scores: list[dict], stats: dict, window: int, dr_cfg: dict | None = None) -> str:
     weighted = stats.get("_weighted_avg") or {}
     type_dist = _session_type_distribution(scores)
     lines = [
@@ -216,6 +253,14 @@ def render_markdown(date: str, scores: list[dict], stats: dict, window: int) -> 
         lines.append("## Combo patterns detected")
         for c in combos:
             lines.append(f"- **{c['label']}** — {c['why']}. → {c['fix']}")
+
+    if dr_cfg and dr_cfg.get("show_worst_sessions", True):
+        worst = _worst_sessions(
+            scores,
+            float(dr_cfg.get("worst_sessions_threshold", 0.5)),
+            int(dr_cfg.get("worst_sessions_max", 3)),
+        )
+        lines.extend(render_worst_sessions_md(worst))
     return "\n".join(lines) + "\n"
 
 
@@ -241,6 +286,67 @@ def _lowest_axis(stats: dict) -> tuple[str, float] | None:
         return None
     cand.sort(key=lambda x: x[1])
     return cand[0]
+
+
+# Resume-command templates per provider. Claude Code has a stable `--resume`
+# flag; Codex CLI exposes session resume via the same flag; Gemini CLI has no
+# first-class session-id resume, so we point at the on-disk session file.
+_PROVIDER_RESUME: dict[str, str] = {
+    "claude": "claude --resume {id}",
+    "codex": "codex --resume {id}",
+    "gemini": "# gemini CLI: no stable --resume <id>; inspect ~/.gemini/tmp/**/session-{id}.json",
+}
+
+
+def _resume_command(provider: str | None, session_id: str) -> str:
+    """Render the resume-command hint for a given provider + sessionId.
+
+    Unknown / missing provider falls back to Claude Code (the majority case
+    in real use) rather than no hint at all.
+    """
+    key = (provider or "claude").lower()
+    template = _PROVIDER_RESUME.get(key, _PROVIDER_RESUME["claude"])
+    return template.format(id=session_id)
+
+
+def _lowest_axis_for_score(score: dict) -> str | None:
+    """Lowest non-suppressed axis for a single score. Used to explain why a
+    session looks problematic alongside its weighted_avg."""
+    axes = score.get("axes") or {}
+    meta = score.get("meta") or {}
+    suppressed = set(meta.get("suppressed_axes") or [])
+    cand = [
+        (a, v) for a, v in axes.items()
+        if a not in suppressed and isinstance(v, (int, float))
+    ]
+    if not cand:
+        return None
+    cand.sort(key=lambda x: x[1])
+    return cand[0][0]
+
+
+def _worst_sessions(scores: list[dict], threshold: float, max_count: int) -> list[dict]:
+    """Pick sessions with weighted_avg < threshold, sorted ascending (worst first).
+
+    Filters out sessions without a sessionId (can't be resumed) and caps at
+    max_count. Config-driven via `{daily,weekly}_report.show_worst_sessions`
+    / `worst_sessions_threshold` / `worst_sessions_max`.
+    """
+    if max_count <= 0:
+        return []
+    candidates: list[dict] = []
+    for s in scores:
+        wa = s.get("weighted_avg")
+        if not isinstance(wa, (int, float)):
+            continue
+        if wa >= threshold:
+            continue
+        sid = (s.get("meta") or {}).get("sessionId")
+        if not sid:
+            continue
+        candidates.append(s)
+    candidates.sort(key=lambda s: s["weighted_avg"])
+    return candidates[:max_count]
 
 
 _AXIS_SUGGESTIONS: dict[str, list[str]] = {
@@ -433,7 +539,7 @@ def _session_type_distribution(scores: list[dict]) -> dict[str, int]:
     return dict(dist)
 
 
-def render_slack_payload(date: str, scores: list[dict], stats: dict, channel: str) -> dict:
+def render_slack_payload(date: str, scores: list[dict], stats: dict, channel: str, dr_cfg: dict | None = None) -> dict:
     weighted = stats.get("_weighted_avg") or {}
     total_sessions = len(scores)
     tally = _suppression_tally(scores)
@@ -523,6 +629,15 @@ def render_slack_payload(date: str, scores: list[dict], stats: dict, channel: st
             "type": "section",
             "text": {"type": "mrkdwn", "text": "\n".join(combo_lines)},
         })
+    if dr_cfg and dr_cfg.get("show_worst_sessions", True):
+        worst = _worst_sessions(
+            scores,
+            float(dr_cfg.get("worst_sessions_threshold", 0.5)),
+            int(dr_cfg.get("worst_sessions_max", 3)),
+        )
+        worst_block = render_worst_sessions_block(worst)
+        if worst_block is not None:
+            blocks.append(worst_block)
     blocks.append({
         "type": "context",
         "elements": [{
@@ -575,8 +690,8 @@ def main() -> int:
 
     stats = compute_axis_stats(scores)
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    md = render_markdown(date, scores, stats, window)
-    payload = render_slack_payload(date, scores, stats, channel)
+    md = render_markdown(date, scores, stats, window, dr_cfg)
+    payload = render_slack_payload(date, scores, stats, channel, dr_cfg)
 
     if args.print_payload:
         print(json.dumps(payload, indent=2))

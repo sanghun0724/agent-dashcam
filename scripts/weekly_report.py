@@ -43,9 +43,12 @@ from daily_report import (
     _session_date,
     _suppression_tally,
     _weak_axes,
+    _worst_sessions,
     bar,
     compute_axis_stats,
     load_config,
+    render_worst_sessions_block,
+    render_worst_sessions_md,
     trend_arrow,
 )
 
@@ -162,7 +165,7 @@ def top_bottom_sessions(scores: list[dict], k: int = 1) -> tuple[list[dict], lis
     return ranked[-k:][::-1], ranked[:k]
 
 
-def render_markdown(end: datetime, days: int, scores: list[dict], prev_scores: list[dict], stats: dict) -> str:
+def render_markdown(end: datetime, days: int, scores: list[dict], prev_scores: list[dict], stats: dict, wr_cfg: dict | None = None) -> str:
     period_end = end.strftime("%Y-%m-%d")
     period_start = (end - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     weighted = stats.get("_weighted_avg") or {}
@@ -243,6 +246,14 @@ def render_markdown(end: datetime, days: int, scores: list[dict], prev_scores: l
             + ", ".join(f"`{a}`" for a in skipped)
         )
 
+    if wr_cfg and wr_cfg.get("show_worst_sessions", True):
+        worst_list = _worst_sessions(
+            scores,
+            float(wr_cfg.get("worst_sessions_threshold", 0.5)),
+            int(wr_cfg.get("worst_sessions_max", 3)),
+        )
+        lines.extend(render_worst_sessions_md(worst_list))
+
     return "\n".join(lines) + "\n"
 
 
@@ -253,6 +264,7 @@ def render_slack_payload(
     prev_scores: list[dict],
     stats: dict,
     channel: str,
+    wr_cfg: dict | None = None,
 ) -> dict:
     period_end = end.strftime("%Y-%m-%d")
     period_start = (end - timedelta(days=days - 1)).strftime("%Y-%m-%d")
@@ -347,6 +359,16 @@ def render_slack_payload(
             },
         })
 
+    if wr_cfg and wr_cfg.get("show_worst_sessions", True):
+        worst_list = _worst_sessions(
+            scores,
+            float(wr_cfg.get("worst_sessions_threshold", 0.5)),
+            int(wr_cfg.get("worst_sessions_max", 3)),
+        )
+        worst_block = render_worst_sessions_block(worst_list)
+        if worst_block is not None:
+            blocks.append(worst_block)
+
     blocks.append({
         "type": "context",
         "elements": [{
@@ -401,8 +423,8 @@ def main() -> int:
     prev_window = load_scores_in_window(end - timedelta(days=args.days), args.days)
 
     stats = compute_axis_stats(this_window)
-    md = render_markdown(end, args.days, this_window, prev_window, stats)
-    payload = render_slack_payload(end, args.days, this_window, prev_window, stats, channel)
+    md = render_markdown(end, args.days, this_window, prev_window, stats, wr_cfg)
+    payload = render_slack_payload(end, args.days, this_window, prev_window, stats, channel, wr_cfg)
 
     if args.print_payload:
         print(json.dumps(payload, indent=2))
