@@ -51,6 +51,12 @@
     "enabled": true,
     "include_trend_window": 7
   },
+  "weekly_report": {
+    "slack_channel": "YOUR_SLACK_CHANNEL_ID",
+    "enabled": true,
+    "days": 7,
+    "golden_threshold": 0.75
+  },
   "phase3_trigger_threshold": 0.4,
   "phase3_trigger_window": 3,
   "github_repo": "anthropics/claude-code",

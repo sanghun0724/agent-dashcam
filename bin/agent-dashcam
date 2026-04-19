@@ -54,6 +54,22 @@ def cmd_daily(args: argparse.Namespace) -> int:
     return subprocess.call(cli)
 
 
+def cmd_weekly(args: argparse.Namespace) -> int:
+    script = SCRIPTS / "weekly_report.py"
+    cli = [sys.executable, str(script)]
+    if args.days:
+        cli += ["--days", str(args.days)]
+    if args.dry_run:
+        cli.append("--dry-run")
+    if args.print_payload:
+        cli.append("--print-payload")
+    if args.stdout_md:
+        cli.append("--stdout-md")
+    if args.channel:
+        cli += ["--channel", args.channel]
+    return subprocess.call(cli)
+
+
 def cmd_export(args: argparse.Namespace) -> int:
     script = SCRIPTS / "export_prometheus.py"
     cli = [sys.executable, str(script)]
@@ -133,6 +149,14 @@ def main() -> int:
     d.add_argument("--stdout-md", action="store_true", help="Markdown만 stdout")
     d.add_argument("--channel", default=None, help="Slack channel override")
     d.set_defaults(func=cmd_daily)
+
+    w = sub.add_parser("weekly", help="주간 리포트 — WoW delta + combo 빈도 + golden rate")
+    w.add_argument("--days", type=int, default=None, help="윈도우 일수 (default 7)")
+    w.add_argument("--dry-run", action="store_true")
+    w.add_argument("--print-payload", action="store_true", help="Slack blocks JSON만 stdout")
+    w.add_argument("--stdout-md", action="store_true", help="Markdown만 stdout")
+    w.add_argument("--channel", default=None, help="Slack channel override")
+    w.set_defaults(func=cmd_weekly)
 
     ex = sub.add_parser("export", help="Prometheus textfile 포맷 export (v3)")
     ex.add_argument("--output", default=None, help="출력 경로 (default /tmp/agent-dashcam.prom)")

@@ -9,6 +9,12 @@ Agent Dashcam turns every coding-agent session into structured telemetry — the
 
 Supports [Claude Code](https://claude.com/claude-code), [Codex CLI](https://github.com/openai/codex-cli), and [Gemini CLI](https://github.com/google-gemini/gemini-cli) — `agent-dashcam score --input <jsonl>` auto-detects the provider, and per-provider stop-hook wrappers (`hooks/{session,codex,gemini}-stop.mjs`) wire into each CLI's native hook manifest. The 10 axes are vendor-neutral; three heuristics (`read_edit_ratio`, `count_useful_outputs`, session-type classification) still key off Claude PascalCase tool names and fall back to neutral on Codex / Gemini until the next phase lifts them onto canonical tool families. See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`CHANGELOG.md`](./CHANGELOG.md).
 
+> ### :pushpin: A note on what these scores actually are
+>
+> **These numbers are not absolute truth.** "Session quality" is inherently fuzzy, context-dependent, and partially subjective — what counts as a good session for a spike differs from a good session for a production hotfix. Agent Dashcam is **one opinionated attempt** at making that fuzzy thing measurable: ten deterministic proxies, a session-type classifier to suppress axes that do not apply, and combo patterns so a single dip is not treated as a verdict.
+>
+> Read the axes as **signals to investigate**, not as grades. A 0.42 on `cost_efficiency` means "worth a look," not "you are bad." The dashcam records the tape; you still decide what the footage means. The framework is open on purpose — fork the weights, add your own axes, disagree with the classifier. The goal is to move the conversation from vibes to something you can look at twice.
+
 ---
 
 ## Why "Agent Dashcam"?
@@ -166,7 +172,7 @@ python3 ~/.claude/agent-dashcam/scripts/install_hooks.py
 
 # 5. Verify
 python3 -m unittest discover -s ~/.claude/agent-dashcam/fixtures
-# → Ran 122 tests in 0.6s … OK
+# → Ran 137 tests in 0.6s … OK
 ```
 
 > **Path note**: scripts default to `~/.claude/agent-dashcam/` as root. Override with `AGENT_DASHCAM_ROOT=/path/to/install` to point at a different location (works for both Python scripts and Node hooks).
@@ -185,6 +191,10 @@ agent-dashcam score --input /path/to/session-<uuid>.json --provider gemini
 
 # Generate today's daily report (markdown + Slack blocks payload)
 agent-dashcam daily
+
+# Generate the weekly report — WoW delta, combo frequency, golden-session rate, activity sparkline
+agent-dashcam weekly                 # last 7 days by default
+agent-dashcam weekly --days 14       # wider window
 
 # Run the environment-update impact analysis
 agent-dashcam envup
@@ -206,7 +216,7 @@ Daily Slack DM payloads land in `reports/daily/daily-<date>.slack.json` — pipe
 python3 -m unittest discover -s fixtures
 ```
 
-122 tests cover:
+137 tests cover:
 
 - All 10 axis calculations (unit tests with synthetic input)
 - Session-type classifier (8 types + edge cases)
@@ -218,6 +228,7 @@ python3 -m unittest discover -s fixtures
 - CLI provider dispatch (`--provider {auto,claude,codex,gemini}` + path/first-line auto-detect + claude fallback)
 - Codex + Gemini stop-hook wrappers (`node --check`, dry-run, end-to-end scoring through the right adapter)
 - OpenAI (gpt-5 / gpt-5-codex / o1-mini / o4-mini) and Gemini (2.5-pro / 2.5-flash / 1.5-pro / 1.5-flash) pricing lookup
+- Weekly report (`scripts/weekly_report.py`) — time-windowed load, daily activity bucketing, unicode sparkline, per-session combo frequency, golden-rate stats, week-over-week delta, best/worst-session picker, and full Markdown + Slack payload render
 
 ---
 
