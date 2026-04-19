@@ -2,6 +2,10 @@
 
 [English](./README.md) · [한국어](./README.ko.md)
 
+<p align="center">
+  <img src="./docs/images/banner.png" alt="Agent Dashcam — 10-axis agent performance overview, session score 0.68" width="720" />
+</p>
+
 > **A 10-axis session scorer and environment-update radar for coding agents.**
 > Stop guessing why your session burned 500k tokens. Watch the tape.
 

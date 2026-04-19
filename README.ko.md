@@ -2,6 +2,10 @@
 
 [English](./README.md) · [한국어](./README.ko.md)
 
+<p align="center">
+  <img src="./docs/images/banner.png" alt="Agent Dashcam — 10축 에이전트 성능 개요, 세션 점수 0.68" width="720" />
+</p>
+
 > **코딩 에이전트용 10축 세션 채점기 + 환경 업데이트 임팩트 레이더.**
 > 세션에 왜 500k 토큰이 녹았는지 짐작하지 말고, 녹화본을 돌려보세요.
 
