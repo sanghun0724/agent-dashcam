@@ -4,6 +4,20 @@ All notable changes to Agent Dashcam are documented here. Format: [Keep a Change
 
 ## [Unreleased] — Multi-provider day-one close (Phases 1–3 + 5)
 
+### Security
+
+- **Hook path allowlist** (`hooks/_common.mjs`, `hooks/codex-stop.mjs`, `hooks/gemini-stop.mjs`) — `transcript_path` / `rollout_path` supplied via stdin is now resolved against an allowlist (`~/.codex`, `~/.gemini`, `~/.claude`, `AGENT_DASHCAM_ROOT`) before being passed to the scorer. Defense-in-depth against a malicious stdin payload routing the scorer to arbitrary filesystem locations. Users with sessions stored outside the defaults (or tests using tempdir fixtures) can extend the allowlist via the `AGENT_DASHCAM_HOOK_EXTRA_ROOTS` env var (`path.delimiter`-separated). Rejected paths are logged with tag `PATH_OUTSIDE_ALLOWLIST` and the hook exits 0.
+- **Hook stdin size cap** (`hooks/_common.mjs`) — `readStdin()` now truncates input at 1 MiB (`MAX_STDIN_BYTES`). Real Stop payloads are < 1 KiB; larger inputs are treated as DoS / misconfiguration and the hook still exits 0.
+- **2 new tests** in `fixtures/test_hook_wrappers.py` verify that `codex-stop.mjs` and `gemini-stop.mjs` refuse a `transcript_path` outside the default allowlist (no `AGENT_DASHCAM_HOOK_EXTRA_ROOTS` set).
+
+### Fixed
+
+- **Codex cumulative-token over-count** (`scripts/adapters/codex.py`) — `_attach_usage` and `iter_events[token_count]` now prefer `info.last_token_usage` (per-turn marginal) over `info.total_token_usage` (session-cumulative running total). Summing N cumulative snapshots across N `token_count` events was inflating `cost_efficiency` and `context_efficiency` by ~N× on real Codex sessions (smoke-tested session: $11,226 → $91 after fix). Falls back to `total_token_usage` for schema-compat when `last_token_usage` is absent.
+
+### Changed
+
+- **Gemini support downgraded to experimental / roadmap** — the `scripts/adapters/gemini.py` adapter was written against a speculative `{role, parts, metadata, usageMetadata}` JSONL shape that does not match real Gemini CLI output. Real Gemini sessions live at `~/.gemini/tmp/<hash>/chats/session-*.json` as a single JSON object `{sessionId, projectHash, messages: [{id, timestamp, type, content}]}`. All five real Gemini sessions we tested parse to zero tokens / zero tool calls / neutral 0.5 axes. README + README.ko + roadmap updated to reflect this: Claude Code and Codex CLI are first-class supported; Gemini is listed as experimental until the real-session parser lands. Synthetic-fixture Gemini tests continue to pass and are preserved as the parser target contract for the rewrite.
+
 ### Added
 
 - **`docs/ARCHITECTURE.md`** — multi-provider design document: native-log survey (Claude / Codex / Gemini), canonical event schema, tool-family map, per-provider hook integration, 7-phase roadmap.
@@ -16,7 +30,7 @@ All notable changes to Agent Dashcam are documented here. Format: [Keep a Change
 - **`hooks/gemini-stop.mjs`** — Node ESM `SessionEnd`-hook wrapper for Gemini CLI. Accepts `transcript_path` (Gemini's native stdin field) or a `session_id` fallback that walks `~/.gemini/tmp/<project_hash>/chats/session-*.json`. Same `--dry-run` semantics.
 - **Pricing tables** — `config.example.json` now includes OpenAI (`gpt-5-codex`, `gpt-5`, `o1-mini`, `o4-mini`) and Google (`gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-1.5-pro`, `gemini-1.5-flash`) entries with `input` / `output` / `cache_read` / `cache_write` rates in USD per 1M tokens, plus a `pricing_sources` block citing the vendor pricing pages and access date. Previously only Anthropic models were priced.
 - **New test files** — `fixtures/test_adapter_claude.py` (15), `fixtures/test_adapter_codex.py` (19), `fixtures/test_adapter_gemini.py` (18), `fixtures/test_provider_dispatch.py` (18 — path + first-line heuristics, explicit and auto routing, CLI end-to-end), `fixtures/test_hook_wrappers.py` (8 — `node --check` + dry-run + end-to-end scoring through each wrapper), `fixtures/test_pricing_lookup.py` (8 — required-model coverage, rate lookup correctness, non-zero `cost_efficiency` for synthetic sessions of each new model family).
-- **Weekly report** — `scripts/weekly_report.py` + `bin/agent-dashcam weekly` + `config.example.json` `weekly_report` block. Distinct weekly signals vs. the count-based daily view: time-windowed `[end - days, end)` load, week-over-week delta on `weighted_avg`, per-session combo-pattern frequency (counts how many sessions hit each of the 5 combos, vs. daily's single-point detect), golden-session rate (`% sessions ≥ 0.75`), 7-day activity sparkline (`" ▁▂▃▄▅▆▇█"`), and best/worst session picks. Shares axis-stats + suppression helpers with `daily_report.py`. 15 new tests in `fixtures/test_weekly_report.py`. Total: 137 tests.
+- **Weekly report** — `scripts/weekly_report.py` + `bin/agent-dashcam weekly` + `config.example.json` `weekly_report` block. Distinct weekly signals vs. the count-based daily view: time-windowed `[end - days, end)` load, week-over-week delta on `weighted_avg`, per-session combo-pattern frequency (counts how many sessions hit each of the 5 combos, vs. daily's single-point detect), golden-session rate (`% sessions ≥ 0.75`), 7-day activity sparkline (`" ▁▂▃▄▅▆▇█"`), and best/worst session picks. Shares axis-stats + suppression helpers with `daily_report.py`. 15 new tests in `fixtures/test_weekly_report.py`. Total: 141 tests (includes Codex `last_token_usage` preference + fallback coverage).
 
 ### Changed
 
@@ -28,6 +42,8 @@ All notable changes to Agent Dashcam are documented here. Format: [Keep a Change
 - **Gemini `$rewindTo` over-counting** — rewound turns are still reflected in token / tool-use totals because the adapter does not truncate preceding content. Documented in `scripts/adapters/gemini.py` module docstring.
 - **Gemini `usageMetadata.promptTokenCount` semantics unverified** — passed through to Claude `input_tokens` as-is. If Gemini CLI reports a cumulative running total rather than per-turn marginal, `cost_efficiency` and `context_efficiency` will inflate for long Gemini sessions. Needs validation against real Gemini session files.
 - **Gemini cache-write pricing is heuristic** — Google bills context caching via TTL-based storage rather than per-token writes, so `gemini-*.cache_write` is set to the input rate as a fallback. Real long-session Gemini costs may diverge; treat `cost_efficiency` as indicative, not exact, for cache-heavy Gemini runs.
+- **Codex `last_token_usage.input_tokens` cached-exclusion semantics unverified** — `_attach_usage` in `scripts/adapters/codex.py` passes `input_tokens` straight through to Claude's non-cached `input_tokens` key. This matches the documented `total_token_usage` contract but has not been validated against a real Codex rollout sample where `last_token_usage` is populated. If Codex reports `input_tokens` inclusive of cached tokens in the marginal per-turn shape, `cost_efficiency` will over-count by the cached delta. Flagged with a `# UNVERIFIED` comment at the call site; needs a real rollout with both fields present to confirm.
+- **Cost figures are JSONL-derived estimates, not billing-reconciled** — all dollar amounts (`cost_efficiency`, `cost_per_useful_output`, daily/weekly totals) come from JSONL token counts multiplied by the `config.example.json` public pricing table. They are not reconciled against the Anthropic / OpenAI / Google billing invoice. Per-agent attribution across subagents is not separated — subagent token usage folds into the parent session, so a "session cost" is the aggregate for the whole tree rather than a per-agent breakdown.
 
 ## [3.0.0] — 2026-04-19
 

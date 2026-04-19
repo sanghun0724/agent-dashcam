@@ -150,6 +150,42 @@ def _token_count(input_tokens=1000, cached=800, output=250) -> dict:
     }
 
 
+def _token_count_with_last(
+    last_input=100, last_cached=80, last_output=25,
+    total_input=9999, total_cached=8888, total_output=7777,
+) -> dict:
+    """token_count payload carrying BOTH last_token_usage and total_token_usage.
+
+    Real Codex rollouts emit both: `last_token_usage` is the per-turn marginal,
+    `total_token_usage` is the session-cumulative running total. Summing
+    marginals across N turns yields the correct session total; summing totals
+    inflates by ~N*. The adapter must prefer `last_token_usage`.
+    """
+    return {
+        "timestamp": "2026-04-19T00:00:07.000Z",
+        "type": "event_msg",
+        "payload": {
+            "type": "token_count",
+            "info": {
+                "last_token_usage": {
+                    "input_tokens": last_input,
+                    "cached_input_tokens": last_cached,
+                    "output_tokens": last_output,
+                    "reasoning_output_tokens": 0,
+                    "total_tokens": last_input + last_output,
+                },
+                "total_token_usage": {
+                    "input_tokens": total_input,
+                    "cached_input_tokens": total_cached,
+                    "output_tokens": total_output,
+                    "reasoning_output_tokens": 0,
+                    "total_tokens": total_input + total_output,
+                },
+            },
+        },
+    }
+
+
 def _assistant_message(text: str) -> dict:
     return {
         "timestamp": "2026-04-19T00:00:08.000Z",
@@ -368,6 +404,54 @@ class TokenCountAttachmentTests(unittest.TestCase):
             self.assertEqual(len(data["tool_names"]), 2)
             # Two tool_results on the user side.
             self.assertEqual(len(data["user_msgs"]), 3)  # 1 user_msg + 2 tool_results
+        finally:
+            path.unlink()
+
+
+class LastTokenUsagePreferenceTests(unittest.TestCase):
+    """Regression tests for the $11,226 → $91 fix.
+
+    Real Codex rollouts emit both `last_token_usage` (per-turn marginal) and
+    `total_token_usage` (session-cumulative). The adapter must prefer the
+    marginal; summing cumulative snapshots across N token_count events
+    inflates cost by ~N*. These tests lock the preference and the fallback.
+    """
+
+    def test_prefers_last_token_usage_when_both_present(self):
+        path = _write_jsonl([
+            _session_meta(),
+            _reasoning("thinking"),
+            _function_call("read_file", {"path": "a"}, call_id="fc_1"),
+            _token_count_with_last(
+                last_input=100, last_cached=80, last_output=25,
+                total_input=9999, total_cached=8888, total_output=7777,
+            ),
+        ])
+        try:
+            data = codex_adapter.load_session(path, {})
+            usage = data["assistant_msgs"][-1]["message"]["usage"]
+            # Marginal wins — cumulative totals must not leak in.
+            self.assertEqual(usage["input_tokens"], 100)
+            self.assertEqual(usage["cache_read_input_tokens"], 80)
+            self.assertEqual(usage["output_tokens"], 25)
+        finally:
+            path.unlink()
+
+    def test_falls_back_to_total_token_usage_when_last_missing(self):
+        # Legacy fixture helper emits only total_token_usage — the fallback
+        # path still needs to work for schema-compat and older rollouts.
+        path = _write_jsonl([
+            _session_meta(),
+            _reasoning("thinking"),
+            _function_call("read_file", {"path": "a"}, call_id="fc_1"),
+            _token_count(input_tokens=500, cached=300, output=150),
+        ])
+        try:
+            data = codex_adapter.load_session(path, {})
+            usage = data["assistant_msgs"][-1]["message"]["usage"]
+            self.assertEqual(usage["input_tokens"], 500)
+            self.assertEqual(usage["cache_read_input_tokens"], 300)
+            self.assertEqual(usage["output_tokens"], 150)
         finally:
             path.unlink()
 

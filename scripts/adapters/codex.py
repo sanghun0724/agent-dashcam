@@ -261,10 +261,18 @@ def _convert_function_call_output(payload: dict) -> dict:
 
 
 def _attach_usage(assistant_msgs: list[dict], info: dict) -> None:
-    """Merge Codex token_count totals into the last assistant msg usage dict."""
+    """Merge Codex token_count totals into the last assistant msg usage dict.
+
+    Prefers `last_token_usage` (per-turn marginal) over `total_token_usage`
+    (session-cumulative running total). Summing per-turn marginals across N
+    turns yields the correct session total; summing cumulative snapshots from
+    N `token_count` events inflates by ~N*.
+    """
     if not assistant_msgs:
         return
-    totals = info.get("total_token_usage") if isinstance(info, dict) else None
+    totals = info.get("last_token_usage") if isinstance(info, dict) else None
+    if not isinstance(totals, dict):
+        totals = info.get("total_token_usage") if isinstance(info, dict) else None
     if not isinstance(totals, dict):
         totals = info if isinstance(info, dict) else {}
     def _as_int(x) -> int:
@@ -273,8 +281,13 @@ def _attach_usage(assistant_msgs: list[dict], info: dict) -> None:
     cached = _as_int(totals.get("cached_input_tokens"))
     output_tokens = _as_int(totals.get("output_tokens"))
     usage = assistant_msgs[-1]["message"].setdefault("usage", {})
-    # Codex `input_tokens` already excludes cached; Claude's `input_tokens` is
-    # likewise the non-cached portion. No subtraction needed.
+    # Codex `total_token_usage.input_tokens` excludes cached (validated); Claude's
+    # `input_tokens` is likewise the non-cached portion, so no subtraction is
+    # needed for the total-path fallback.
+    # UNVERIFIED: `last_token_usage.input_tokens` cached-exclusion semantics have
+    # not been validated against a real rollout sample. If Codex reports this
+    # field inclusive of cached tokens, cost_efficiency will over-count by the
+    # cached delta. See CHANGELOG "Known limitations" for the open question.
     usage["input_tokens"] = input_tokens
     usage["cache_read_input_tokens"] = cached
     usage["cache_creation_input_tokens"] = usage.get("cache_creation_input_tokens", 0)
@@ -613,7 +626,11 @@ def iter_events(path: Path, tail_threshold_bytes: int = 20 * 1024 * 1024, tail_n
             ptype = payload.get("type")
             if ptype == "token_count":
                 info = payload.get("info") or {}
-                totals = info.get("total_token_usage") if isinstance(info, dict) else None
+                # Per-turn marginal preferred over cumulative to avoid N*-overcount
+                # when multiple token_count events fire across a session.
+                totals = info.get("last_token_usage") if isinstance(info, dict) else None
+                if not isinstance(totals, dict):
+                    totals = info.get("total_token_usage") if isinstance(info, dict) else None
                 if not isinstance(totals, dict):
                     totals = info if isinstance(info, dict) else {}
                 if pending_agent is not None:

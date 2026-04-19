@@ -9,7 +9,7 @@ import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
-  makeLogger, readStdin, pathExists, runPython,
+  makeLogger, readStdin, pathExists, runPython, isAllowedPath,
 } from "./_common.mjs";
 
 const logError = makeLogger("gemini-stop");
@@ -45,7 +45,13 @@ async function findRecentChat(sessionId) {
 
 async function resolveTranscript(payload) {
   const direct = payload.transcript_path || payload.path || payload.chat_path;
-  if (direct && await pathExists(direct)) return direct;
+  if (direct) {
+    if (!isAllowedPath(direct)) {
+      await logError("PATH_OUTSIDE_ALLOWLIST", { path: direct });
+    } else if (await pathExists(direct)) {
+      return direct;
+    }
+  }
   const sid = payload.session_id || payload.sessionId;
   if (sid) {
     const found = await findRecentChat(sid);

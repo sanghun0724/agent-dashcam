@@ -8,7 +8,7 @@ import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
-  makeLogger, readStdin, pathExists, runPython,
+  makeLogger, readStdin, pathExists, runPython, isAllowedPath,
 } from "./_common.mjs";
 
 const logError = makeLogger("codex-stop");
@@ -43,7 +43,13 @@ async function findRecentRollout(sessionId) {
 
 async function resolveRollout(payload) {
   const direct = payload.transcript_path || payload.rollout_path || payload.path;
-  if (direct && await pathExists(direct)) return direct;
+  if (direct) {
+    if (!isAllowedPath(direct)) {
+      await logError("PATH_OUTSIDE_ALLOWLIST", { path: direct });
+    } else if (await pathExists(direct)) {
+      return direct;
+    }
+  }
   const sid = payload.session_id || payload.sessionId;
   if (sid) {
     const found = await findRecentRollout(sid);

@@ -11,7 +11,7 @@
 
 Agent Dashcam은 모든 코딩 에이전트 세션을 구조화된 텔레메트리로 변환합니다 — 그리고 LLM이 자기 과제를 스스로 채점하게 두지 않습니다. Python이 채점하고, Node 훅이 브리핑하고, 사람이 행동합니다.
 
-[Claude Code](https://claude.com/claude-code), [Codex CLI](https://github.com/openai/codex-cli), [Gemini CLI](https://github.com/google-gemini/gemini-cli) 를 지원합니다. `agent-dashcam score --input <jsonl>` 은 provider를 자동 감지하고, provider별 stop-hook wrapper (`hooks/{session,codex,gemini}-stop.mjs`) 가 각 CLI의 네이티브 훅 매니페스트에 연결됩니다. 10축은 vendor-neutral 이지만 일부 휴리스틱 (`read_edit_ratio`, `count_useful_outputs`, 세션 타입 분류) 은 Claude PascalCase 툴 이름에 키잉되어 있어, canonical tool family 로 리프트되기 전까지 Codex / Gemini 세션에서는 중립값으로 fallback 합니다. 자세한 multi-provider 레이어링과 남은 known limitations 은 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) 와 [`CHANGELOG.md`](./CHANGELOG.md) 참고.
+현재 풀 지원: [Claude Code](https://claude.com/claude-code), [Codex CLI](https://github.com/openai/codex-cli). `agent-dashcam score --input <jsonl>` 이 provider 를 자동 감지하고, stop-hook wrapper (`hooks/{session,codex}-stop.mjs`) 가 각 CLI 의 네이티브 훅 매니페스트에 연결됩니다. [Gemini CLI](https://github.com/google-gemini/gemini-cli) adapter 는 speculative 스키마 기준으로 랜딩되어 있지만, 실제 `~/.gemini/tmp/<hash>/chats/session-*.json` 파일은 아직 파싱하지 못합니다 — real-session parser 가 랜딩되기 전까지 Gemini 는 **experimental / roadmap** 으로 취급 (Roadmap 참고). 10축은 vendor-neutral 이지만 일부 휴리스틱 (`read_edit_ratio`, `count_useful_outputs`, 세션 타입 분류) 은 Claude PascalCase 툴 이름에 키잉되어 있어, canonical tool family 로 리프트되기 전까지 Codex 세션에서는 중립값으로 fallback 합니다. 자세한 multi-provider 레이어링과 남은 known limitations 은 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) 와 [`CHANGELOG.md`](./CHANGELOG.md) 참고.
 
 > ### :pushpin: 이 점수가 무엇인지에 대한 안내
 >
@@ -175,7 +175,7 @@ python3 ~/.claude/agent-dashcam/scripts/install_hooks.py
 
 # 5. 검증
 python3 -m unittest discover -s ~/.claude/agent-dashcam/fixtures
-# → Ran 137 tests in 0.6s … OK
+# → Ran 141 tests in 0.6s … OK
 ```
 
 > **경로 노트**: 스크립트는 기본으로 `~/.claude/agent-dashcam/` 를 루트로 씁니다. `AGENT_DASHCAM_ROOT=/path/to/install` 로 다른 위치 지정 가능 (Python 스크립트 · Node 훅 둘 다 인식).
@@ -219,7 +219,7 @@ agent-dashcam status
 python3 -m unittest discover -s fixtures
 ```
 
-137 테스트가 커버:
+141 테스트가 커버:
 
 - 10축 전부의 계산 (합성 입력 기반 유닛 테스트)
 - 세션 타입 분류기 (8 타입 + 엣지 케이스)
@@ -227,9 +227,9 @@ python3 -m unittest discover -s fixtures
 - 스키마 드리프트 감지
 - 100 라인 fixture JSONL 기반 10축 통합 테스트
 - 가중치 합 invariant
-- Claude · Codex · Gemini adapter + canonical event stream (3개 provider 의 tool-family map, `load_session` dict shape, `iter_events` typing, 잘못된 줄 resilience, fixture 전반의 end-to-end `score_jsonl()` smoke)
+- Claude · Codex · (speculative 스키마) Gemini adapter + canonical event stream (3개 provider 의 tool-family map, `load_session` dict shape, `iter_events` typing, 잘못된 줄 resilience, fixture 전반의 end-to-end `score_jsonl()` smoke — Gemini 테스트는 synthetic fixture 기반, 실제 CLI 세션 아님)
 - CLI provider dispatch (`--provider {auto,claude,codex,gemini}` + 경로/첫 줄 자동 감지 + claude fallback)
-- Codex + Gemini stop-hook wrapper (`node --check`, dry-run, 올바른 adapter 경유 end-to-end 채점)
+- Codex + Gemini stop-hook wrapper (`node --check`, dry-run, 올바른 adapter 경유 end-to-end 채점 — Gemini wrapper 자체는 동작하지만 내부 adapter 는 real-schema 재작성 필요)
 - OpenAI (gpt-5 / gpt-5-codex / o1-mini / o4-mini) · Gemini (2.5-pro / 2.5-flash / 1.5-pro / 1.5-flash) 가격 조회
 - 주간 리포트 (`scripts/weekly_report.py`) — 시간 윈도우 기반 점수 로드, 요일별 세션 버킷팅, 유니코드 sparkline, 세션별 combo 빈도 카운트, golden-rate 통계, 주간 대비 델타, best/worst 세션 픽, Markdown + Slack payload 렌더링
 
@@ -237,6 +237,7 @@ python3 -m unittest discover -s fixtures
 
 ## 로드맵
 
+- **Gemini real-session parser 재작성** — 현 Gemini adapter 는 speculative `{role, parts, metadata, usageMetadata}` JSONL 형식을 가정하고 작성되었지만, 실제 Gemini CLI 는 `~/.gemini/tmp/<hash>/chats/session-*.json` 하나에 `{sessionId, projectHash, messages: [{id, timestamp, type, content}]}` 구조로 단일 JSON object 를 기록합니다. 테스트한 5개 실제 세션 전부 0 토큰 / 0 툴콜 / 중립 0.5 축으로 파싱됨. Gemini 를 first-class 지원으로 올리려면 `load_session` + `iter_events` + `iter_records` 를 실제 스키마에 맞춰 재작성 필요.
 - **Scorer tool-family 인식** — `compute_read_edit_ratio`, `count_useful_outputs`, `classify_session_type` 를 raw Claude PascalCase 문자열에서 canonical family 로 리프트해 Codex / Gemini 세션도 10축 전부 풀-피델리티 채점.
 - **Codex / Gemini 용 SessionStart 브리퍼** — 기존 stop-hook wrapper 의 카운터파트. 각 CLI 의 네이티브 `SessionStart` 채널로 다음 세션 브리핑 emit.
 - **OTel GenAI exporter** — canonical event stream → OTLP (`gen_ai.*` attributes) 로 Grafana · Honeycomb · Datadog 대시보드에 vendor lock-in 없이 연결.

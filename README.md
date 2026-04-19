@@ -11,7 +11,7 @@
 
 Agent Dashcam turns every coding-agent session into structured telemetry — then refuses to let the LLM grade its own homework. Python scores, Node hooks brief, humans act.
 
-Supports [Claude Code](https://claude.com/claude-code), [Codex CLI](https://github.com/openai/codex-cli), and [Gemini CLI](https://github.com/google-gemini/gemini-cli) — `agent-dashcam score --input <jsonl>` auto-detects the provider, and per-provider stop-hook wrappers (`hooks/{session,codex,gemini}-stop.mjs`) wire into each CLI's native hook manifest. The 10 axes are vendor-neutral; three heuristics (`read_edit_ratio`, `count_useful_outputs`, session-type classification) still key off Claude PascalCase tool names and fall back to neutral on Codex / Gemini until the next phase lifts them onto canonical tool families. See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`CHANGELOG.md`](./CHANGELOG.md).
+Full support today for [Claude Code](https://claude.com/claude-code) and [Codex CLI](https://github.com/openai/codex-cli) — `agent-dashcam score --input <jsonl>` auto-detects the provider, and the stop-hook wrappers (`hooks/{session,codex}-stop.mjs`) wire into each CLI's native hook manifest. A [Gemini CLI](https://github.com/google-gemini/gemini-cli) adapter has landed against a speculative schema but does **not** parse real `~/.gemini/tmp/<hash>/chats/session-*.json` files yet — treat Gemini as experimental / roadmap until the real-session parser lands (see Roadmap). The 10 axes are vendor-neutral; three heuristics (`read_edit_ratio`, `count_useful_outputs`, session-type classification) still key off Claude PascalCase tool names and fall back to neutral on Codex until the next phase lifts them onto canonical tool families. See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`CHANGELOG.md`](./CHANGELOG.md).
 
 > ### :pushpin: A note on what these scores actually are
 >
@@ -176,7 +176,7 @@ python3 ~/.claude/agent-dashcam/scripts/install_hooks.py
 
 # 5. Verify
 python3 -m unittest discover -s ~/.claude/agent-dashcam/fixtures
-# → Ran 137 tests in 0.6s … OK
+# → Ran 141 tests in 0.6s … OK
 ```
 
 > **Path note**: scripts default to `~/.claude/agent-dashcam/` as root. Override with `AGENT_DASHCAM_ROOT=/path/to/install` to point at a different location (works for both Python scripts and Node hooks).
@@ -220,7 +220,7 @@ Daily Slack DM payloads land in `reports/daily/daily-<date>.slack.json` — pipe
 python3 -m unittest discover -s fixtures
 ```
 
-137 tests cover:
+141 tests cover:
 
 - All 10 axis calculations (unit tests with synthetic input)
 - Session-type classifier (8 types + edge cases)
@@ -228,9 +228,9 @@ python3 -m unittest discover -s fixtures
 - Schema drift detection
 - 10-axis integration on a 100-line fixture JSONL
 - Weight-sum invariant
-- Claude, Codex, and Gemini adapters + canonical event stream (tool-family map for all three providers, `load_session` dict shape, `iter_events` typing, malformed-line resilience, end-to-end `score_jsonl()` smoke across fixtures)
+- Claude, Codex, and (speculative-schema) Gemini adapters + canonical event stream (tool-family map for all three providers, `load_session` dict shape, `iter_events` typing, malformed-line resilience, end-to-end `score_jsonl()` smoke across fixtures — Gemini tests use synthetic fixtures, not real CLI sessions)
 - CLI provider dispatch (`--provider {auto,claude,codex,gemini}` + path/first-line auto-detect + claude fallback)
-- Codex + Gemini stop-hook wrappers (`node --check`, dry-run, end-to-end scoring through the right adapter)
+- Codex + Gemini stop-hook wrappers (`node --check`, dry-run, end-to-end scoring through the right adapter — Gemini wrapper works but the underlying adapter still needs a real-schema rewrite)
 - OpenAI (gpt-5 / gpt-5-codex / o1-mini / o4-mini) and Gemini (2.5-pro / 2.5-flash / 1.5-pro / 1.5-flash) pricing lookup
 - Weekly report (`scripts/weekly_report.py`) — time-windowed load, daily activity bucketing, unicode sparkline, per-session combo frequency, golden-rate stats, week-over-week delta, best/worst-session picker, and full Markdown + Slack payload render
 
@@ -238,6 +238,7 @@ python3 -m unittest discover -s fixtures
 
 ## Roadmap
 
+- **Gemini real-session parser rewrite** — the current Gemini adapter was written against a speculative `{role, parts, metadata, usageMetadata}` JSONL shape; real Gemini CLI writes a single JSON object `{sessionId, projectHash, messages: [{id, timestamp, type, content}]}` per `~/.gemini/tmp/<hash>/chats/session-*.json`. All five real sessions we tested parse to zero tokens / zero tool calls / neutral 0.5 axes. `load_session` + `iter_events` + `iter_records` need a rewrite to match the real schema before Gemini can be listed as a first-class supported provider.
 - **Scorer tool-family awareness** — lift `compute_read_edit_ratio`, `count_useful_outputs`, and `classify_session_type` off raw Claude PascalCase strings and onto canonical families so Codex/Gemini sessions get full fidelity on all 10 axes.
 - **SessionStart briefers for Codex/Gemini** — counterparts to the existing stop-hook wrappers that emit the next-session briefing via each CLI's native `SessionStart` channel.
 - **OTel GenAI exporter** — canonical event stream → OTLP (`gen_ai.*` attributes) for Grafana / Honeycomb / Datadog dashboards without a vendor lock-in.

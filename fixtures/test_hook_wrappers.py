@@ -70,11 +70,14 @@ class TestHookSyntax(unittest.TestCase):
 
 @unittest.skipUnless(_have_node(), "node not available in test environment")
 class TestHookDryRun(unittest.TestCase):
-    def _run(self, hook_name: str, payload: dict) -> dict:
+    def _run(self, hook_name: str, payload: dict, extra_root: Path | None = None) -> dict:
+        env = dict(os.environ)
+        if extra_root is not None:
+            env["AGENT_DASHCAM_HOOK_EXTRA_ROOTS"] = str(extra_root)
         out = subprocess.run(
             ["node", str(HOOKS_DIR / hook_name), "--dry-run"],
             input=json.dumps(payload),
-            check=True, capture_output=True, text=True, timeout=10,
+            check=True, capture_output=True, text=True, timeout=10, env=env,
         )
         first = out.stdout.splitlines()[0].strip()
         return json.loads(first)
@@ -84,7 +87,7 @@ class TestHookDryRun(unittest.TestCase):
             p = Path(tmp) / "rollout-codex-smoke.jsonl"
             _write(p, _codex_fixture())
             payload = {"transcript_path": str(p), "session_id": "codex-smoke"}
-            result = self._run("codex-stop.mjs", payload)
+            result = self._run("codex-stop.mjs", payload, extra_root=Path(tmp))
             self.assertTrue(result.get("dry_run"))
             self.assertEqual(result["hook"], "codex-stop")
             self.assertEqual(result["rollout"], str(p))
@@ -94,7 +97,7 @@ class TestHookDryRun(unittest.TestCase):
             p = Path(tmp) / "session-gemini-smoke.json"
             _write(p, _gemini_fixture())
             payload = {"transcript_path": str(p), "session_id": "gemini-smoke"}
-            result = self._run("gemini-stop.mjs", payload)
+            result = self._run("gemini-stop.mjs", payload, extra_root=Path(tmp))
             self.assertTrue(result.get("dry_run"))
             self.assertEqual(result["hook"], "gemini-stop")
             self.assertEqual(result["transcript"], str(p))
@@ -113,6 +116,48 @@ class TestHookDryRun(unittest.TestCase):
             input="{}", capture_output=True, text=True, timeout=10,
         )
         self.assertEqual(proc.returncode, 0)
+
+
+@unittest.skipUnless(_have_node(), "node not available in test environment")
+class TestHookPathAllowlist(unittest.TestCase):
+    """Security: stdin transcript_path outside the allowlist must not route
+    the scorer to arbitrary filesystem locations. Without extra_root set,
+    a tempdir path is outside (~/.codex / ~/.gemini / ~/.claude / $AGENT_DASHCAM_ROOT)
+    and the hook should exit 0 without resolving."""
+
+    def test_codex_rejects_path_outside_allowlist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "rollout-evil.jsonl"
+            _write(p, _codex_fixture())
+            # No AGENT_DASHCAM_HOOK_EXTRA_ROOTS → tempdir is outside allowlist.
+            env = {k: v for k, v in os.environ.items()
+                   if k != "AGENT_DASHCAM_HOOK_EXTRA_ROOTS"}
+            payload = {"transcript_path": str(p), "session_id": "does-not-exist"}
+            proc = subprocess.run(
+                ["node", str(HOOKS_DIR / "codex-stop.mjs"), "--dry-run"],
+                input=json.dumps(payload), capture_output=True, text=True,
+                timeout=10, env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            # Dry-run emits JSON only when a path resolves. Rejected path → no JSON line.
+            self.assertFalse(proc.stdout.strip(),
+                             f"expected empty stdout, got: {proc.stdout!r}")
+
+    def test_gemini_rejects_path_outside_allowlist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "session-evil.json"
+            _write(p, _gemini_fixture())
+            env = {k: v for k, v in os.environ.items()
+                   if k != "AGENT_DASHCAM_HOOK_EXTRA_ROOTS"}
+            payload = {"transcript_path": str(p), "session_id": "does-not-exist"}
+            proc = subprocess.run(
+                ["node", str(HOOKS_DIR / "gemini-stop.mjs"), "--dry-run"],
+                input=json.dumps(payload), capture_output=True, text=True,
+                timeout=10, env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            self.assertFalse(proc.stdout.strip(),
+                             f"expected empty stdout, got: {proc.stdout!r}")
 
 
 @unittest.skipUnless(_have_node(), "node not available in test environment")
