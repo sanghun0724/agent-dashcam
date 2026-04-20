@@ -52,7 +52,9 @@
     "include_trend_window": 7,
     "show_worst_sessions": true,
     "worst_sessions_threshold": 0.5,
-    "worst_sessions_max": 3
+    "worst_sessions_max": 3,
+    "show_subagent_breakdown": true,
+    "subagent_breakdown_max": 5
   },
   "weekly_report": {
     "slack_channel": "YOUR_SLACK_CHANNEL_ID",
@@ -61,7 +63,9 @@
     "golden_threshold": 0.75,
     "show_worst_sessions": true,
     "worst_sessions_threshold": 0.5,
-    "worst_sessions_max": 3
+    "worst_sessions_max": 3,
+    "show_subagent_breakdown": true,
+    "subagent_breakdown_max": 5
   },
   "phase3_trigger_threshold": 0.4,
   "phase3_trigger_window": 3,

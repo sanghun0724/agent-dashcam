@@ -153,6 +153,133 @@ class WorstSessionsTests(unittest.TestCase):
         self.assertEqual(daily_report._worst_sessions(scores, 0.5, 0), [])
 
 
+def _mk_score_with_attribution(attribution: dict | None) -> dict:
+    return {
+        "weighted_avg": 0.5,
+        "axes": {"a": 0.5},
+        "meta": {"agent_attribution": attribution} if attribution is not None else {},
+    }
+
+
+class AggregateAgentAttributionTests(unittest.TestCase):
+    def test_empty_returns_empty(self):
+        self.assertEqual(daily_report._aggregate_agent_attribution([]), [])
+
+    def test_sums_across_sessions(self):
+        scores = [
+            _mk_score_with_attribution({
+                "architect": {"total_tokens": 1000, "tool_uses": 5, "duration_ms": 2000, "call_count": 1},
+            }),
+            _mk_score_with_attribution({
+                "architect": {"total_tokens": 500, "tool_uses": 2, "duration_ms": 1000, "call_count": 1},
+                "Explore":   {"total_tokens": 800, "tool_uses": 3, "duration_ms": 1500, "call_count": 1},
+            }),
+        ]
+        agg = daily_report._aggregate_agent_attribution(scores)
+        by_name = {e["subagent_type"]: e for e in agg}
+        self.assertEqual(by_name["architect"]["total_tokens"], 1500)
+        self.assertEqual(by_name["architect"]["call_count"], 2)
+        self.assertEqual(by_name["architect"]["tool_uses"], 7)
+        self.assertEqual(by_name["architect"]["duration_ms"], 3000)
+        self.assertEqual(by_name["Explore"]["total_tokens"], 800)
+
+    def test_sorted_by_tokens_descending(self):
+        scores = [
+            _mk_score_with_attribution({
+                "light":  {"total_tokens": 100, "tool_uses": 1, "duration_ms": 100, "call_count": 1},
+                "heavy":  {"total_tokens": 9000, "tool_uses": 10, "duration_ms": 5000, "call_count": 2},
+                "medium": {"total_tokens": 2000, "tool_uses": 4, "duration_ms": 1200, "call_count": 1},
+            }),
+        ]
+        agg = daily_report._aggregate_agent_attribution(scores)
+        self.assertEqual([e["subagent_type"] for e in agg], ["heavy", "medium", "light"])
+
+    def test_skips_sessions_without_attribution(self):
+        scores = [
+            {"weighted_avg": 0.5, "meta": {}},
+            {"weighted_avg": 0.5, "meta": {"agent_attribution": None}},
+            _mk_score_with_attribution({
+                "only": {"total_tokens": 42, "tool_uses": 1, "duration_ms": 1, "call_count": 1},
+            }),
+        ]
+        agg = daily_report._aggregate_agent_attribution(scores)
+        self.assertEqual(len(agg), 1)
+        self.assertEqual(agg[0]["subagent_type"], "only")
+        self.assertEqual(agg[0]["total_tokens"], 42)
+
+    def test_ignores_malformed_values(self):
+        scores = [
+            _mk_score_with_attribution({
+                "bad": {"total_tokens": "not-a-number", "tool_uses": None, "duration_ms": [], "call_count": 1},
+            }),
+        ]
+        agg = daily_report._aggregate_agent_attribution(scores)
+        self.assertEqual(len(agg), 1)
+        self.assertEqual(agg[0]["total_tokens"], 0)
+        self.assertEqual(agg[0]["call_count"], 1)
+
+
+class FormatHelperTests(unittest.TestCase):
+    def test_fmt_tokens_scales(self):
+        self.assertEqual(daily_report._fmt_tokens(500), "500")
+        self.assertEqual(daily_report._fmt_tokens(1500), "1.5k")
+        self.assertEqual(daily_report._fmt_tokens(2_500_000), "2.5M")
+
+    def test_fmt_duration_ms_scales(self):
+        self.assertEqual(daily_report._fmt_duration_ms(500), "0.5s")
+        self.assertEqual(daily_report._fmt_duration_ms(3000), "3.0s")
+        self.assertEqual(daily_report._fmt_duration_ms(120_000), "2.0m")
+
+
+class SubagentBreakdownRenderTests(unittest.TestCase):
+    def _sample_agg(self) -> list[dict]:
+        return [
+            {"subagent_type": "architect", "total_tokens": 12000, "tool_uses": 8, "duration_ms": 45000, "call_count": 1},
+            {"subagent_type": "Explore",   "total_tokens": 8000,  "tool_uses": 5, "duration_ms": 12000, "call_count": 2},
+        ]
+
+    def test_md_empty_returns_empty(self):
+        self.assertEqual(daily_report.render_subagent_breakdown_md([]), [])
+
+    def test_md_top_n_zero_returns_empty(self):
+        self.assertEqual(daily_report.render_subagent_breakdown_md(self._sample_agg(), 0), [])
+
+    def test_md_contains_heading_and_rows(self):
+        lines = daily_report.render_subagent_breakdown_md(self._sample_agg())
+        text = "\n".join(lines)
+        self.assertIn("Subagent cost breakdown", text)
+        self.assertIn("architect", text)
+        self.assertIn("12.0k", text)
+        self.assertIn("45.0s", text)
+        self.assertIn("Explore", text)
+
+    def test_md_respects_top_n_cap(self):
+        lines = daily_report.render_subagent_breakdown_md(self._sample_agg(), 1)
+        text = "\n".join(lines)
+        self.assertIn("architect", text)
+        self.assertNotIn("Explore", text)
+
+    def test_block_empty_returns_none(self):
+        self.assertIsNone(daily_report.render_subagent_breakdown_block([]))
+
+    def test_block_shape_and_payload(self):
+        block = daily_report.render_subagent_breakdown_block(self._sample_agg())
+        self.assertEqual(block["type"], "section")
+        self.assertEqual(block["text"]["type"], "mrkdwn")
+        text = block["text"]["text"]
+        self.assertIn("Subagent cost breakdown", text)
+        self.assertIn("architect", text)
+        self.assertIn("12.0k tokens", text)
+        self.assertIn("1 call", text)
+        self.assertIn("2 calls", text)
+
+    def test_block_singular_call_label(self):
+        agg = [{"subagent_type": "solo", "total_tokens": 100, "tool_uses": 1, "duration_ms": 500, "call_count": 1}]
+        block = daily_report.render_subagent_breakdown_block(agg)
+        self.assertIn("1 call ", block["text"]["text"])
+        self.assertNotIn("1 calls", block["text"]["text"])
+
+
 class WorstSessionsRenderTests(unittest.TestCase):
     def test_render_md_empty_returns_empty_list(self):
         self.assertEqual(daily_report.render_worst_sessions_md([]), [])

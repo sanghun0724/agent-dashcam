@@ -159,6 +159,87 @@ def trend_arrow(slope: float) -> str:
     return "→"
 
 
+def _aggregate_agent_attribution(scores: list[dict]) -> list[dict]:
+    """Collapse `meta.agent_attribution` across scores into a sorted list.
+
+    Each input score carries `{subagent_type: {total_tokens, tool_uses,
+    duration_ms, call_count}}`. We sum the four counters per subagent_type
+    across the whole window, then sort descending by total_tokens so the
+    heaviest delegates surface first in a capped "top N" view. Non-numeric
+    / malformed values are skipped defensively — a single bad session must
+    not tank the entire breakdown.
+    """
+    bucket: dict[str, dict] = {}
+    for s in scores:
+        attr = (s.get("meta") or {}).get("agent_attribution") or {}
+        if not isinstance(attr, dict):
+            continue
+        for name, stats in attr.items():
+            if not isinstance(name, str) or not isinstance(stats, dict):
+                continue
+            b = bucket.setdefault(
+                name,
+                {"total_tokens": 0, "tool_uses": 0, "duration_ms": 0, "call_count": 0},
+            )
+            for k in ("total_tokens", "tool_uses", "duration_ms", "call_count"):
+                v = stats.get(k)
+                if isinstance(v, (int, float)):
+                    b[k] += int(v)
+    out = [{"subagent_type": name, **vals} for name, vals in bucket.items()]
+    out.sort(key=lambda d: (-d["total_tokens"], -d["call_count"], d["subagent_type"]))
+    return out
+
+
+def _fmt_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(int(n))
+
+
+def _fmt_duration_ms(ms: int) -> str:
+    if ms >= 60_000:
+        return f"{ms / 60_000:.1f}m"
+    return f"{ms / 1000:.1f}s"
+
+
+def render_subagent_breakdown_md(agg: list[dict], top_n: int = 5) -> list[str]:
+    """Markdown table of the top-N heaviest subagents. Empty list when nothing
+    attributable (no sessions delegated, or no `<usage>` blocks present)."""
+    if not agg or top_n <= 0:
+        return []
+    top = agg[:top_n]
+    lines = ["", "## Subagent cost breakdown"]
+    lines.append("")
+    lines.append("| Subagent | tokens | calls | tool_uses | duration |")
+    lines.append("|----------|--------|-------|-----------|----------|")
+    for e in top:
+        lines.append(
+            f"| `{e['subagent_type']}` | {_fmt_tokens(e['total_tokens'])} | "
+            f"{e['call_count']} | {e['tool_uses']} | {_fmt_duration_ms(e['duration_ms'])} |"
+        )
+    return lines
+
+
+def render_subagent_breakdown_block(agg: list[dict], top_n: int = 5) -> dict | None:
+    """Slack mrkdwn block for the top-N heaviest subagents. None when empty."""
+    if not agg or top_n <= 0:
+        return None
+    top = agg[:top_n]
+    lines = [":robot_face: *Subagent cost breakdown*"]
+    for e in top:
+        suffix = "" if e["call_count"] == 1 else "s"
+        lines.append(
+            f"• `{e['subagent_type']}` — "
+            f"{_fmt_tokens(e['total_tokens'])} tokens · "
+            f"{e['call_count']} call{suffix} · "
+            f"{e['tool_uses']} tool_uses · "
+            f"{_fmt_duration_ms(e['duration_ms'])}"
+        )
+    return {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}}
+
+
 def render_worst_sessions_md(worst: list[dict]) -> list[str]:
     """Render the 'sessions that need a look' section in markdown. Returns
     list of lines; caller appends + joins. Empty list when nothing to show."""
@@ -261,6 +342,11 @@ def render_markdown(date: str, scores: list[dict], stats: dict, window: int, dr_
             int(dr_cfg.get("worst_sessions_max", 3)),
         )
         lines.extend(render_worst_sessions_md(worst))
+
+    if not dr_cfg or dr_cfg.get("show_subagent_breakdown", True):
+        agg = _aggregate_agent_attribution(scores)
+        top_n = int((dr_cfg or {}).get("subagent_breakdown_max", 5))
+        lines.extend(render_subagent_breakdown_md(agg, top_n))
     return "\n".join(lines) + "\n"
 
 
@@ -638,6 +724,12 @@ def render_slack_payload(date: str, scores: list[dict], stats: dict, channel: st
         worst_block = render_worst_sessions_block(worst)
         if worst_block is not None:
             blocks.append(worst_block)
+    if not dr_cfg or dr_cfg.get("show_subagent_breakdown", True):
+        agg = _aggregate_agent_attribution(scores)
+        top_n = int((dr_cfg or {}).get("subagent_breakdown_max", 5))
+        breakdown_block = render_subagent_breakdown_block(agg, top_n)
+        if breakdown_block is not None:
+            blocks.append(breakdown_block)
     blocks.append({
         "type": "context",
         "elements": [{

@@ -37,6 +37,7 @@ from daily_report import (
     AXIS_ORDER,
     SCORES_DIR,
     _COMBO_PATTERNS,
+    _aggregate_agent_attribution,
     _axis_actions,
     _filter_suppressed,
     _now_iso,
@@ -47,6 +48,8 @@ from daily_report import (
     bar,
     compute_axis_stats,
     load_config,
+    render_subagent_breakdown_block,
+    render_subagent_breakdown_md,
     render_worst_sessions_block,
     render_worst_sessions_md,
     trend_arrow,
@@ -254,6 +257,11 @@ def render_markdown(end: datetime, days: int, scores: list[dict], prev_scores: l
         )
         lines.extend(render_worst_sessions_md(worst_list))
 
+    if not wr_cfg or wr_cfg.get("show_subagent_breakdown", True):
+        agg = _aggregate_agent_attribution(scores)
+        top_n = int((wr_cfg or {}).get("subagent_breakdown_max", 5))
+        lines.extend(render_subagent_breakdown_md(agg, top_n))
+
     return "\n".join(lines) + "\n"
 
 
@@ -368,6 +376,13 @@ def render_slack_payload(
         worst_block = render_worst_sessions_block(worst_list)
         if worst_block is not None:
             blocks.append(worst_block)
+
+    if not wr_cfg or wr_cfg.get("show_subagent_breakdown", True):
+        agg = _aggregate_agent_attribution(scores)
+        top_n = int((wr_cfg or {}).get("subagent_breakdown_max", 5))
+        breakdown_block = render_subagent_breakdown_block(agg, top_n)
+        if breakdown_block is not None:
+            blocks.append(breakdown_block)
 
     blocks.append({
         "type": "context",
