@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Iterator
 
@@ -125,6 +126,84 @@ def extract_assistant_text(assistant_msgs: list[dict]) -> str:
     return " ".join(buf).lower()
 
 
+# `<usage>total_tokens: N tool_uses: M duration_ms: D</usage>` is what a
+# Claude Code subagent embeds in the text payload of its `Agent` (or legacy
+# `Task`) tool_result so the parent session can surface a summary line. We
+# parse it to attribute tokens to the `subagent_type` that produced them —
+# this is the only per-subagent signal the parent JSONL carries, since
+# real subagent turns live in a separate (or ephemeral) log.
+_AGENT_USAGE_RE = re.compile(
+    r"<usage>\s*total_tokens:\s*(\d+)\s+tool_uses:\s*(\d+)\s+duration_ms:\s*(\d+)\s*</usage>"
+)
+
+
+def _collect_agent_attribution(records: list[dict]) -> dict[str, dict]:
+    """Build per-subagent token attribution from `Agent` / `Task` tool_use pairs.
+
+    Strategy:
+      1. Walk records once: for every tool_use where name in {"Agent","Task"},
+         map its `id` → `input.subagent_type` (e.g. "architect", "Explore").
+      2. Walk records again: for every tool_result, look up its tool_use_id
+         in the map; if matched, scan the result text for the
+         `<usage>total_tokens … tool_uses … duration_ms …</usage>` block the
+         subagent embeds, and accumulate those counters under the
+         subagent_type bucket.
+
+    Returns: `{subagent_type: {total_tokens, tool_uses, duration_ms, call_count}}`.
+    Empty dict when no subagents were invoked (or none returned usage blocks).
+    Callers must tolerate an empty dict (backward compat for legacy JSONL).
+    """
+    tu_to_agent: dict[str, str] = {}
+    for r in records:
+        content = safe_get(r, "message", "content", default=[]) or []
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") != "tool_use":
+                continue
+            if block.get("name") not in ("Agent", "Task"):
+                continue
+            agent = (block.get("input") or {}).get("subagent_type")
+            tu_id = block.get("id")
+            if agent and tu_id:
+                tu_to_agent[tu_id] = agent
+
+    buckets: dict[str, dict] = {}
+    for r in records:
+        content = safe_get(r, "message", "content", default=[]) or []
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            agent = tu_to_agent.get(block.get("tool_use_id"))
+            if not agent:
+                continue
+            text_blob = ""
+            tc = block.get("content")
+            if isinstance(tc, list):
+                for item in tc:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        t = item.get("text") or ""
+                        if isinstance(t, str):
+                            text_blob += t + "\n"
+            elif isinstance(tc, str):
+                text_blob = tc
+            m = _AGENT_USAGE_RE.search(text_blob)
+            b = buckets.setdefault(
+                agent,
+                {"total_tokens": 0, "tool_uses": 0, "duration_ms": 0, "call_count": 0},
+            )
+            b["call_count"] += 1
+            if m:
+                b["total_tokens"] += int(m.group(1))
+                b["tool_uses"] += int(m.group(2))
+                b["duration_ms"] += int(m.group(3))
+    return buckets
+
+
 def extract_user_text(user_msgs: list[dict]) -> str:
     """user 메시지 중 tool_result가 아닌 실제 사용자 입력만 합친 lowercase."""
     buf: list[str] = []
@@ -196,6 +275,7 @@ def load_session(path: Path, config: dict) -> dict:
         "project_dir": project_dir,
         "jsonl_lines": len(records),
         "jsonl_bytes": path.stat().st_size,
+        "agent_attribution": _collect_agent_attribution(records),
     }
 
 

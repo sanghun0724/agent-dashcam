@@ -568,6 +568,7 @@ def score_jsonl(path: Path, config: dict, provider: str | None = None) -> dict:
             "sessionId": session_id,
             "provider": session_data.get("provider"),
             "project_dir": project_dir,
+            "agent_attribution": session_data.get("agent_attribution") or {},
             "jsonl_lines": session_data["jsonl_lines"],
             "jsonl_bytes": session_data["jsonl_bytes"],
             "partial_score": partial,
